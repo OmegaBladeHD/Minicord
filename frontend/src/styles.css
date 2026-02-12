@@ -1,0 +1,227 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  background:
+    radial-gradient(circle at 10% 10%, #1d3557 0%, transparent 40%),
+    radial-gradient(circle at 90% 10%, #312e81 0%, transparent 35%),
+    #030712;
+  color: #e5e7eb;
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.auth-shell,
+.app-shell {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.auth-shell {
+  display: grid;
+  place-items: center;
+}
+
+.auth-card {
+  width: min(520px, 92vw);
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 20px;
+  backdrop-filter: blur(14px);
+  padding: 28px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-size: 2rem;
+  color: #dbeafe;
+}
+
+.auth-card p {
+  opacity: 0.75;
+}
+
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.mode-switch button,
+button,
+input {
+  border-radius: 12px;
+  border: 1px solid transparent;
+  padding: 11px 13px;
+}
+
+.mode-switch button,
+.ghost {
+  background: #111827;
+  color: #cbd5e1;
+}
+
+.mode-switch .active {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #fff;
+}
+
+button {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #fff;
+  cursor: pointer;
+}
+
+input {
+  background: #0f172a;
+  color: #f3f4f6;
+  border-color: #1f2937;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.error {
+  margin: 0;
+  color: #fda4af;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+}
+
+.panel {
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.left {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(140deg, #2563eb, #7c3aed);
+  font-weight: 700;
+}
+
+.profile span {
+  display: block;
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100vh - 320px);
+  overflow: auto;
+}
+
+.list-item {
+  text-align: left;
+  background: #0b1220;
+  border: 1px solid #1f2937;
+}
+
+.chat {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: calc(100vh - 48px);
+}
+
+.chat header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #1f2937;
+  padding-bottom: 12px;
+}
+
+.messages {
+  overflow: auto;
+  padding: 16px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg {
+  max-width: 75%;
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.msg p {
+  margin: 0 0 5px;
+}
+
+.msg time {
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+
+.composer {
+  border-top: 1px solid #1f2937;
+  padding-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.composer input {
+  flex: 1;
+}
+
+.danger {
+  background: linear-gradient(135deg, #dc2626, #be123c);
+}
+
+.compact {
+  gap: 7px;
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .chat {
+    min-height: 70vh;
+  }
+}
