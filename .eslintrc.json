@@ -1,0 +1,18 @@
+{
+  "root": true,
+  "ignorePatterns": ["dist", "node_modules"],
+  "overrides": [
+    {
+      "files": ["backend/src/**/*.ts", "frontend/src/**/*.{ts,tsx}"],
+      "parser": "@typescript-eslint/parser",
+      "plugins": ["@typescript-eslint"],
+      "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
+      "rules": {
+        "quotes": ["error", "single"],
+        "semi": ["error", "always"],
+        "no-console": "warn",
+        "@typescript-eslint/no-explicit-any": "error"
+      }
+    }
+  ]
+}
