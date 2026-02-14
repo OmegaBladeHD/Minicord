@@ -71,7 +71,7 @@ export const MessageList = ({ messages, me, isLoading, typingText, onAddReaction
 
   return (
     <div className="messages messages-virtualized">
-      <List height={460} itemCount={messages.length} itemSize={132} width="100%" itemData={rowData} overscanCount={10}>
+      <List height={460} itemCount={messages.length} itemSize={96} width="100%" itemData={rowData} overscanCount={10}>
         {Row}
       </List>
       {typingText && (

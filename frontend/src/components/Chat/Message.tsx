@@ -16,6 +16,14 @@ export const Message = memo(({ message, me, onAddReaction, onEditMessage, onDele
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
 
+  if (message.deletedAt) {
+    return (
+      <article className={`msg ${isOwn ? 'own' : 'other'} deleted`}>
+        <p>Message supprimé</p>
+      </article>
+    );
+  }
+
   const saveEdit = () => {
     if (!draft.trim()) return;
     onEditMessage(message.id, draft.trim());

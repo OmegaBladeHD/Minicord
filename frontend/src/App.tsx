@@ -10,8 +10,28 @@ const normalizeDmRoom = (a: string, b: string) => ['dm', ...[a, b].sort()].join(
 const AuthPage = lazy(() => import('./pages/AuthPage'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 
-type TypingEvent = { userId: string; pseudo: string; targetType: 'dm' | 'group'; targetId: string; isTyping: boolean };
 type PresenceEvent = { userId: string; status: string };
+type TypingEvent = {
+  userId: string;
+  pseudo?: string;
+  targetType?: 'dm' | 'group';
+  targetId?: string;
+  conversationType?: 'dm' | 'group';
+  conversationId?: string;
+  isTyping?: boolean;
+};
+
+const toConversationFromTyping = (event: TypingEvent) => {
+  if (event.conversationType && event.conversationId) {
+    return { type: event.conversationType, id: event.conversationId };
+  }
+
+  if (event.targetType && event.targetId) {
+    return { type: event.targetType, id: event.targetId };
+  }
+
+  return null;
+};
 
 export const App = () => {
   const { accessToken, setTokens, me, setMe } = useAuthStore();
@@ -26,13 +46,21 @@ export const App = () => {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [content, setContent] = useState('');
-  const [typingText, setTypingText] = useState('');
+  const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
+  const [isWindowFocused, setIsWindowFocused] = useState(true);
+  const [inCall, setInCall] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [sendError, setSendError] = useState('');
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const typingIntervalRef = useRef<number | null>(null);
 
   const socket = useMemo<Socket | null>(() => (accessToken ? io(API, { auth: { token: accessToken } }) : null), [accessToken]);
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }), [accessToken]);
+
+  const typingText = useMemo(() => {
+    if (!typingUsers.size) return '';
+    return `${typingUsers.size} personne${typingUsers.size > 1 ? 's' : ''} en train d'écrire...`;
+  }, [typingUsers]);
 
   const playNotificationSound = () => {
     if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
@@ -67,6 +95,18 @@ export const App = () => {
   }, []);
 
   useEffect(() => {
+    const onFocus = () => setIsWindowFocused(true);
+    const onBlur = () => setIsWindowFocused(false);
+
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!socket) return;
 
     const onMessage = (msg: ChatMessage & { targetType: 'dm' | 'group'; targetId: string }) => {
@@ -97,19 +137,33 @@ export const App = () => {
       );
     };
 
-    const onMessageUpdated = ({ messageId, content, editedAt }: { messageId: string; content: string; editedAt: string }) => {
-      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, content, editedAt } : m)));
+    const onMessageEdited = ({ messageId, content: nextContent, editedAt }: { messageId: string; content: string; editedAt: string }) => {
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, content: nextContent, editedAt } : m)));
     };
 
-    const onMessageDeleted = ({ messageId }: { messageId: string }) => {
-      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, content: '[Message supprimé]', deletedAt: new Date().toISOString() } : m)));
+    const onMessageDeleted = ({ messageId, deletedAt }: { messageId: string; deletedAt?: string }) => {
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, content: '[Message supprimé]', deletedAt: deletedAt ?? new Date().toISOString() } : m)));
     };
 
     const onTyping = (event: TypingEvent) => {
-      if (!conversation) return;
-      if (event.targetType !== conversation.type || event.targetId !== conversation.id || !event.isTyping) return;
-      setTypingText(`${event.pseudo} est en train d'écrire`);
-      setTimeout(() => setTypingText(''), 3000);
+      const target = toConversationFromTyping(event);
+      if (!target || !conversation) return;
+      if (target.type !== conversation.type || target.id !== conversation.id) return;
+      if (event.userId === me?.id) return;
+
+      setTypingUsers((prev) => {
+        const next = new Set(prev);
+        next.add(event.userId);
+        return next;
+      });
+    };
+
+    const onStopTyping = (event: TypingEvent) => {
+      setTypingUsers((prev) => {
+        const next = new Set(prev);
+        next.delete(event.userId);
+        return next;
+      });
     };
 
     const onPresence = (event: PresenceEvent) => {
@@ -119,27 +173,63 @@ export const App = () => {
 
     socket.on('message:new', onMessage);
     socket.on('reaction:added', onReactionAdded);
-    socket.on('message:updated', onMessageUpdated);
+    socket.on('message:updated', onMessageEdited);
+    socket.on('message:edited', onMessageEdited);
     socket.on('message:deleted', onMessageDeleted);
     socket.on('user:typing', onTyping);
+    socket.on('user:stop-typing', onStopTyping);
     socket.on('presence:update', onPresence);
 
     return () => {
       socket.off('message:new', onMessage);
       socket.off('reaction:added', onReactionAdded);
-      socket.off('message:updated', onMessageUpdated);
+      socket.off('message:updated', onMessageEdited);
+      socket.off('message:edited', onMessageEdited);
       socket.off('message:deleted', onMessageDeleted);
       socket.off('user:typing', onTyping);
+      socket.off('user:stop-typing', onStopTyping);
       socket.off('presence:update', onPresence);
     };
   }, [socket, conversation, appendMessage, setSearchResults, me?.id, setMe, setMessages]);
 
   useEffect(() => {
+    if (!socket || !conversation) return;
+
+    const emitTyping = () => {
+      socket.emit('typing', { conversationId: conversation.id, conversationType: conversation.type });
+    };
+
+    const shouldType = !!content.trim() && isWindowFocused;
+    if (shouldType) {
+      emitTyping();
+      typingIntervalRef.current = window.setInterval(emitTyping, 3000);
+    } else {
+      socket.emit('stop-typing', { conversationId: conversation.id, conversationType: conversation.type });
+      if (typingIntervalRef.current) {
+        window.clearInterval(typingIntervalRef.current);
+        typingIntervalRef.current = null;
+      }
+    }
+
+    return () => {
+      socket.emit('stop-typing', { conversationId: conversation.id, conversationType: conversation.type });
+      if (typingIntervalRef.current) {
+        window.clearInterval(typingIntervalRef.current);
+        typingIntervalRef.current = null;
+      }
+    };
+  }, [content, isWindowFocused, conversation, socket]);
+
+  useEffect(() => {
     if (!conversation || !accessToken) return;
+    setTypingUsers(new Set());
+    setInCall(false);
     setIsLoadingMessages(true);
+
     if (socket) {
-      if (conversation.type === 'group') socket.emit('join:group', conversation.id);
-      else {
+      if (conversation.type === 'group') {
+        socket.emit('join:group', conversation.id);
+      } else {
         const peer = conversation.id.replace('dm:', '').split(':').find((id) => id !== me?.id);
         if (peer) socket.emit('join:dm', peer);
       }
@@ -150,6 +240,13 @@ export const App = () => {
       .then((data) => setMessages(data.items ?? []))
       .finally(() => setIsLoadingMessages(false));
   }, [conversation, accessToken, socket, me?.id, setMessages]);
+
+  useEffect(() => {
+    if (!socket) return;
+    return () => {
+      socket.disconnect();
+    };
+  }, [socket]);
 
   const submitAuth = async (e: FormEvent) => {
     e.preventDefault();
@@ -164,8 +261,6 @@ export const App = () => {
 
   const onTyping = (value: string) => {
     setContent(value);
-    if (!socket || !conversation) return;
-    socket.emit('typing', { targetType: conversation.type, targetId: conversation.id, isTyping: value.length > 0 });
   };
 
   const sendMessage = (e: FormEvent) => {
@@ -184,13 +279,25 @@ export const App = () => {
   };
 
   const onEditMessage = (messageId: string, newContent: string) => {
-    if (!socket || !conversation) return;
-    socket.emit('message:update', { messageId, content: newContent, targetType: conversation.type, targetId: conversation.id });
+    if (!socket) return;
+    socket.emit('message:edit', { messageId, content: newContent });
   };
 
   const onDeleteMessage = (messageId: string) => {
+    if (!socket) return;
+    socket.emit('message:delete', { messageId });
+  };
+
+  const onStartCall = () => {
     if (!socket || !conversation) return;
-    socket.emit('message:delete', { messageId, targetType: conversation.type, targetId: conversation.id });
+    if (inCall) {
+      setInCall(false);
+      socket.emit('voice:state', { state: 'offline', bitrateKbps: 124 });
+      return;
+    }
+
+    setInCall(true);
+    socket.emit('voice:state', { state: 'in_call', bitrateKbps: 124 });
   };
 
   const searchUsers = async (e: FormEvent) => {
@@ -240,6 +347,8 @@ export const App = () => {
           onTyping={onTyping}
           sendMessage={sendMessage}
           sendError={sendError}
+          inCall={inCall}
+          onStartCall={onStartCall}
         />
       )}
     </Suspense>

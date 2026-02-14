@@ -47,8 +47,8 @@ messagesRouter.post('/', validateBody(sendMessageSchema), asyncHandler(async (re
   return res.status(HTTP_STATUS.CREATED).json({ id: inserted.rows[0].id, timestamp: inserted.rows[0].created_at });
 }));
 
-messagesRouter.patch('/:id', validateBody(editSchema), asyncHandler(async (req: AuthRequest, res) => {
-  const parsed = messageIdSchema.safeParse(req.params);
+const handlePatchMessage = async (req: AuthRequest, res: { status: (code: number) => { json: (body: unknown) => unknown }; json: (body: unknown) => unknown }) => {
+  const parsed = messageIdSchema.safeParse({ id: req.params.id ?? req.params.messageId });
   if (!parsed.success) {
     return res.status(HTTP_STATUS.BAD_REQUEST).json({ error: parsed.error.flatten() });
   }
@@ -67,6 +67,14 @@ messagesRouter.patch('/:id', validateBody(editSchema), asyncHandler(async (req: 
     return res.status(HTTP_STATUS.NOT_FOUND).json({ error: 'Message not found' });
   }
   return res.json({ id: updated.rows[0].id, editedAt: updated.rows[0].edited_at, content });
+};
+
+messagesRouter.patch('/:id', validateBody(editSchema), asyncHandler(async (req: AuthRequest, res) => {
+  return handlePatchMessage(req, res);
+}));
+
+messagesRouter.patch('/:messageId', validateBody(editSchema), asyncHandler(async (req: AuthRequest, res) => {
+  return handlePatchMessage(req, res);
 }));
 
 messagesRouter.delete('/:id', asyncHandler(async (req: AuthRequest, res) => {

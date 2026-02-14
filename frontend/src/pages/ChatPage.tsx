@@ -26,10 +26,36 @@ type Props = {
   onTyping: (v: string) => void;
   sendMessage: (e: FormEvent) => void;
   sendError: string;
+  inCall: boolean;
+  onStartCall: () => void;
 };
 
 export default function ChatPage(props: Props) {
-  const { me, groups, searchResults, conversation, query, setQuery, createGroup, searchUsers, openDm, selectGroup, messages, isLoadingMessages, typingText, onAddReaction, onEditMessage, onDeleteMessage, content, onTyping, sendMessage, sendError } = props;
+  const {
+    me,
+    groups,
+    searchResults,
+    conversation,
+    query,
+    setQuery,
+    createGroup,
+    searchUsers,
+    openDm,
+    selectGroup,
+    messages,
+    isLoadingMessages,
+    typingText,
+    onAddReaction,
+    onEditMessage,
+    onDeleteMessage,
+    content,
+    onTyping,
+    sendMessage,
+    sendError,
+    inCall,
+    onStartCall
+  } = props;
+
   return (
     <main className="app-shell">
       <aside className="panel left">
@@ -42,7 +68,16 @@ export default function ChatPage(props: Props) {
         <ConversationList groups={groups} users={searchResults} onOpenDm={openDm} onSelectGroup={selectGroup} active={conversation} />
       </aside>
       <section className="panel chat">
-        <header><h2>{conversation?.label ?? 'Choisir une conversation'}</h2></header>
+        <header className="chat-header">
+          <h2>{conversation?.label ?? 'Choisir une conversation'}</h2>
+          <div className="header-actions">
+            {conversation && (
+              <button className="ghost call-btn" onClick={onStartCall} data-tooltip={inCall ? 'Raccrocher' : 'Démarrer appel vocal'}>
+                {inCall ? '📴' : '📞'}
+              </button>
+            )}
+          </div>
+        </header>
         <MessageList
           messages={messages}
           me={me}

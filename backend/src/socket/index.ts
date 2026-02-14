@@ -8,9 +8,28 @@ import { logger } from '../services/logger.js';
 import { getCachedUserProfile } from '../services/userCache.js';
 import { isParticipantInDmRoom, normalizeDmRoom } from '../types/chat.js';
 
+type ConversationPayload = {
+  conversationType: 'dm' | 'group';
+  conversationId: string;
+};
+
 const isGroupMember = async (groupId: string, userId: string) => {
   const result = await query('SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2 LIMIT 1', [groupId, userId]);
   return result.rowCount > 0;
+};
+
+const parseConversationPayload = (payload: unknown): ConversationPayload | null => {
+  const oldShape = payload as { targetType?: 'dm' | 'group'; targetId?: string };
+  if (oldShape.targetType && oldShape.targetId) {
+    return { conversationType: oldShape.targetType, conversationId: oldShape.targetId };
+  }
+
+  const nextShape = payload as { conversationType?: 'dm' | 'group'; conversationId?: string };
+  if (nextShape.conversationType && nextShape.conversationId) {
+    return { conversationType: nextShape.conversationType, conversationId: nextShape.conversationId };
+  }
+
+  return null;
 };
 
 export const attachSocket = (io: Server) => {
@@ -43,11 +62,45 @@ export const attachSocket = (io: Server) => {
     });
 
     socket.on('typing', async (payload) => {
-      const { targetType, targetId, isTyping } = payload as { targetType: 'dm' | 'group'; targetId: string; isTyping: boolean };
-      const allowed = targetType === 'dm' ? isParticipantInDmRoom(targetId, userId) : await isGroupMember(targetId, userId);
+      const conversation = parseConversationPayload(payload);
+      if (!conversation) return;
+
+      const allowed = conversation.conversationType === 'dm'
+        ? isParticipantInDmRoom(conversation.conversationId, userId)
+        : await isGroupMember(conversation.conversationId, userId);
       if (!allowed) return;
-      const room = targetType === 'group' ? `group:${targetId}` : targetId;
-      socket.to(room).emit('user:typing', { userId, pseudo: profile?.pseudo ?? 'Unknown', targetType, targetId, isTyping });
+
+      const room = conversation.conversationType === 'group'
+        ? `group:${conversation.conversationId}`
+        : conversation.conversationId;
+
+      socket.to(room).emit('user:typing', {
+        userId,
+        pseudo: profile?.pseudo ?? 'Unknown',
+        conversationType: conversation.conversationType,
+        conversationId: conversation.conversationId,
+        targetType: conversation.conversationType,
+        targetId: conversation.conversationId,
+        isTyping: true
+      });
+    });
+
+    socket.on('stop-typing', async (payload) => {
+      const conversation = parseConversationPayload(payload);
+      if (!conversation) return;
+
+      const room = conversation.conversationType === 'group'
+        ? `group:${conversation.conversationId}`
+        : conversation.conversationId;
+
+      socket.to(room).emit('user:stop-typing', {
+        userId,
+        conversationType: conversation.conversationType,
+        conversationId: conversation.conversationId,
+        targetType: conversation.conversationType,
+        targetId: conversation.conversationId,
+        isTyping: false
+      });
     });
 
     socket.on('reaction:add', async (payload, ack) => {
@@ -66,30 +119,73 @@ export const attachSocket = (io: Server) => {
       ack?.({ ok: true });
     });
 
-    socket.on('message:update', async (payload, ack) => {
-      const { messageId, content, targetType, targetId } = payload as { messageId: string; content: string; targetType: 'dm' | 'group'; targetId: string };
+    const updateMessage = async (messageId: string, content: string) => {
+      const checked = await query<{ author_id: string; target_type: 'dm' | 'group'; target_id: string }>(
+        `SELECT author_id, target_type, target_id
+         FROM messages
+         WHERE id = $1 AND deleted_at IS NULL
+         LIMIT 1`,
+        [messageId]
+      );
+      if (!checked.rowCount || checked.rows[0].author_id !== userId) {
+        return { ok: false as const, error: 'Not your message' };
+      }
+
       const updated = await query<{ edited_at: string }>(
         `UPDATE messages SET content = $1, edited_at = NOW()
-         WHERE id = $2 AND author_id = $3 AND deleted_at IS NULL
+         WHERE id = $2
          RETURNING edited_at`,
-        [content, messageId, userId]
+        [content, messageId]
       );
-      if (!updated.rowCount) return ack?.({ ok: false, error: 'Message not found' });
+
+      const targetType = checked.rows[0].target_type;
+      const targetId = checked.rows[0].target_id;
       const room = targetType === 'group' ? `group:${targetId}` : targetId;
-      io.to(room).emit('message:updated', { messageId, content, editedAt: updated.rows[0].edited_at });
-      ack?.({ ok: true });
+      const editedAt = updated.rows[0].edited_at;
+
+      io.to(room).emit('message:updated', { messageId, content, editedAt });
+      io.to(room).emit('message:edited', { messageId, content, editedAt });
+      return { ok: true as const };
+    };
+
+    socket.on('message:update', async (payload, ack) => {
+      const { messageId, content } = payload as { messageId: string; content: string };
+      if (!content?.trim() || content.length > MAX_MESSAGE_LENGTH) return ack?.({ ok: false, error: 'Invalid content' });
+      const result = await updateMessage(messageId, content);
+      ack?.(result);
+    });
+
+    socket.on('message:edit', async (payload, ack) => {
+      const { messageId, content } = payload as { messageId: string; content: string };
+      if (!content?.trim() || content.length > MAX_MESSAGE_LENGTH) return ack?.({ ok: false, error: 'Invalid content' });
+      const result = await updateMessage(messageId, content);
+      ack?.(result);
     });
 
     socket.on('message:delete', async (payload, ack) => {
-      const { messageId, targetType, targetId } = payload as { messageId: string; targetType: 'dm' | 'group'; targetId: string };
-      const deleted = await query(
-        `UPDATE messages SET deleted_at = NOW(), content = '[Message supprimé]'
-         WHERE id = $1 AND author_id = $2 AND deleted_at IS NULL`,
-        [messageId, userId]
+      const { messageId } = payload as { messageId: string };
+      const checked = await query<{ author_id: string; target_type: 'dm' | 'group'; target_id: string }>(
+        'SELECT author_id, target_type, target_id FROM messages WHERE id = $1 LIMIT 1',
+        [messageId]
       );
-      if (!deleted.rowCount) return ack?.({ ok: false, error: 'Message not found' });
+      if (!checked.rowCount || checked.rows[0].author_id !== userId) {
+        return ack?.({ ok: false, error: 'Not your message' });
+      }
+
+      const deleted = await query<{ deleted_at: string }>(
+        `UPDATE messages SET deleted_at = NOW(), content = '[Message supprimé]'
+         WHERE id = $1 AND deleted_at IS NULL
+         RETURNING deleted_at`,
+        [messageId]
+      );
+      if (!deleted.rowCount) {
+        return ack?.({ ok: false, error: 'Message not found' });
+      }
+
+      const targetType = checked.rows[0].target_type;
+      const targetId = checked.rows[0].target_id;
       const room = targetType === 'group' ? `group:${targetId}` : targetId;
-      io.to(room).emit('message:deleted', { messageId });
+      io.to(room).emit('message:deleted', { messageId, deletedAt: deleted.rows[0].deleted_at });
       ack?.({ ok: true });
     });
 
